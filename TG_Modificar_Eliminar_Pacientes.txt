@@ -1,0 +1,64 @@
+CREATE TABLE CLINICA.DATOS_PACIENTES_PERSONAL(
+	FOLIO SERIAL,
+	tipoMovimiento VARCHAR(20),
+	idPaciente CLINICA.ID_PACIENTE,
+	nombrePaciente VARCHAR(20),
+	apellidoPaciente VARCHAR(20),
+	usuario VARCHAR(20),
+	fecha TIMESTAMP
+);
+
+CREATE OR REPLACE FUNCTION CLINICA.BorradoPaciente() RETURNS TRIGGER 
+AS
+$$
+DECLARE
+	usuario VARCHAR(20) := (SELECT current_user);
+	fechaActual TIMESTAMP := (SELECT LEFT(CAST (CURRENT_TIMESTAMP AS CHAR(30)), 19 ));
+BEGIN
+	INSERT INTO CLINICA.DATOS_PACIENTES_PERSONAL 
+	(tipoMovimiento, idPaciente, nombrePaciente, apellidoPaciente, usuario, fecha) VALUES
+	('BORRADO', OLD.pk_idPaciente, OLD.nombre ,OLD.apellido, usuario, fechaActual);
+RETURN NEW;
+END
+$$
+LANGUAGE PLPGSQL;
+
+
+CREATE OR REPLACE TRIGGER Borrado_Paciente AFTER DELETE ON CLINICA.PACIENTE
+FOR EACH ROW
+EXECUTE PROCEDURE CLINICA.BorradoPaciente();
+
+--****
+
+CREATE OR REPLACE FUNCTION CLINICA.ActualizadoPaciente() RETURNS TRIGGER 
+AS
+$$
+DECLARE
+	usuario VARCHAR(20) := (SELECT current_user);
+	fechaActual TIMESTAMP := (SELECT LEFT(CAST (CURRENT_TIMESTAMP AS CHAR(30)), 19 ));
+BEGIN
+	INSERT INTO CLINICA.DATOS_PACIENTES_PERSONAL 
+	(tipoMovimiento, idPaciente, nombrePaciente, apellidoPaciente, usuario, fecha) VALUES
+	('ACTUALIZACIÓN', OLD.pk_idPaciente, OLD.nombre ,OLD.apellido, usuario, fechaActual);
+RETURN NEW;
+END
+$$
+LANGUAGE PLPGSQL;
+
+CREATE OR REPLACE TRIGGER Actualizado_Paciente AFTER UPDATE ON CLINICA.PACIENTE
+FOR EACH ROW
+EXECUTE PROCEDURE CLINICA.ActualizadoPaciente();
+
+
+CALL CLINICA.InsertarPacienteExpediente
+('DANIEL', 'CARMONA', 'M', '1999-01-01', 'MEXICO', 'MEXICO', '5549809822', 'O POSITIVO', 'NA', 'NA' );
+
+DELETE FROM CLINICA.PACIENTE WHERE pk_idPaciente = 'P-0014';
+
+UPDATE CLINICA.PACIENTE SET ciudad = 'MONTERREY' WHERE pk_idPaciente = 'P-0014';
+
+SELECT * FROM CLINICA.PACIENTE;
+
+SELECT * FROM CLINICA.DATOS_PACIENTES_PERSONAL;
+
+

@@ -1,0 +1,1167 @@
+--
+-- PostgreSQL database dump
+--
+
+-- Dumped from database version 16.0
+-- Dumped by pg_dump version 16.0
+
+SET statement_timeout = 0;
+SET lock_timeout = 0;
+SET idle_in_transaction_session_timeout = 0;
+SET client_encoding = 'UTF8';
+SET standard_conforming_strings = on;
+SELECT pg_catalog.set_config('search_path', '', false);
+SET check_function_bodies = false;
+SET xmloption = content;
+SET client_min_messages = warning;
+SET row_security = off;
+
+--
+-- Name: resplado_clinica; Type: DATABASE; Schema: -; Owner: postgres
+--
+
+CREATE DATABASE resplado_clinica WITH TEMPLATE = template0 ENCODING = 'UTF8' LOCALE_PROVIDER = libc LOCALE = 'Spanish_Colombia.1252';
+
+
+ALTER DATABASE resplado_clinica OWNER TO postgres;
+
+\connect resplado_clinica
+
+SET statement_timeout = 0;
+SET lock_timeout = 0;
+SET idle_in_transaction_session_timeout = 0;
+SET client_encoding = 'UTF8';
+SET standard_conforming_strings = on;
+SELECT pg_catalog.set_config('search_path', '', false);
+SET check_function_bodies = false;
+SET xmloption = content;
+SET client_min_messages = warning;
+SET row_security = off;
+
+--
+-- Name: clinica; Type: SCHEMA; Schema: -; Owner: postgres
+--
+
+CREATE SCHEMA clinica;
+
+
+ALTER SCHEMA clinica OWNER TO postgres;
+
+--
+-- Name: id_cita; Type: DOMAIN; Schema: clinica; Owner: postgres
+--
+
+CREATE DOMAIN clinica.id_cita AS character(7) NOT NULL
+	CONSTRAINT id_cita_check CHECK ((VALUE ~ '^[CM]{2}[-]{1}\d{4}$'::text));
+
+
+ALTER DOMAIN clinica.id_cita OWNER TO postgres;
+
+--
+-- Name: id_meespecialista; Type: DOMAIN; Schema: clinica; Owner: postgres
+--
+
+CREATE DOMAIN clinica.id_meespecialista AS character(7) NOT NULL
+	CONSTRAINT id_meespecialista_check CHECK ((VALUE ~ '^[ME]{2}[-]{1}\d{4}$'::text));
+
+
+ALTER DOMAIN clinica.id_meespecialista OWNER TO postgres;
+
+--
+-- Name: id_paciente; Type: DOMAIN; Schema: clinica; Owner: postgres
+--
+
+CREATE DOMAIN clinica.id_paciente AS character(6) NOT NULL
+	CONSTRAINT id_paciente_check CHECK ((VALUE ~ '^[P]{1}[-]{1}\d{4}$'::text));
+
+
+ALTER DOMAIN clinica.id_paciente OWNER TO postgres;
+
+--
+-- Name: actualizadopaciente(); Type: FUNCTION; Schema: clinica; Owner: postgres
+--
+
+CREATE FUNCTION clinica.actualizadopaciente() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+	usuario VARCHAR(20) := (SELECT current_user);
+	fechaActual TIMESTAMP := (SELECT LEFT(CAST (CURRENT_TIMESTAMP AS CHAR(30)), 19 ));
+BEGIN
+	INSERT INTO CLINICA.DATOS_PACIENTES_PERSONAL 
+	(tipoMovimiento, idPaciente, nombrePaciente, apellidoPaciente, usuario, fecha) VALUES
+	('ACTUALIZACIÓN', OLD.pk_idPaciente, OLD.nombre ,OLD.apellido, usuario, fechaActual);
+RETURN NEW;
+END
+$$;
+
+
+ALTER FUNCTION clinica.actualizadopaciente() OWNER TO postgres;
+
+--
+-- Name: borradopaciente(); Type: FUNCTION; Schema: clinica; Owner: postgres
+--
+
+CREATE FUNCTION clinica.borradopaciente() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+	usuario VARCHAR(20) := (SELECT CURRENT_USER);
+	fechaActual TIMESTAMP := (SELECT LEFT(CAST (CURRENT_TIMESTAMP AS CHAR(30)), 19));
+BEGIN
+	INSERT INTO CLINICA.DATOS_PACIENTES_PERSONAL 
+	(tipoMovimiento, idPaciente, nombrePaciente, apellidoPaciente, usuario, fecha) VALUES
+	('BORRADO', OLD.pk_idPaciente, OLD.nombre ,OLD.apellido, usuario, fechaActual);
+RETURN NEW;
+END
+$$;
+
+
+ALTER FUNCTION clinica.borradopaciente() OWNER TO postgres;
+
+--
+-- Name: cancelarcita(clinica.id_cita); Type: PROCEDURE; Schema: clinica; Owner: postgres
+--
+
+CREATE PROCEDURE clinica.cancelarcita(IN idcita clinica.id_cita)
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+	status CHAR(10) := (SELECT status FROM CLINICA.AGENDAR_CITA WHERE fk_idCita = idCita);
+BEGIN
+
+	IF NOT EXISTS (SELECT pk_idCita FROM CLINICA.CITA WHERE pk_idCita = idCita) THEN
+		RAISE NOTICE 'EL ID DE LA CITA NO EXISTE EN LA BASE DE DATOS';
+	ELSEIF status = 'REALIZADO' THEN
+		RAISE NOTICE 'LA CITA YA HA SIDO REALIZADA';
+	ELSE
+		UPDATE CLINICA.AGENDAR_CITA SET status = 'CANCELADA' WHERE fk_idCita = idCita;
+		
+		RAISE NOTICE 'CITA CANCELADA CORRECTAMENTE';
+	END IF;
+
+END; $$;
+
+
+ALTER PROCEDURE clinica.cancelarcita(IN idcita clinica.id_cita) OWNER TO postgres;
+
+--
+-- Name: holamundo(); Type: FUNCTION; Schema: clinica; Owner: postgres
+--
+
+CREATE FUNCTION clinica.holamundo() RETURNS character varying
+    LANGUAGE plpgsql
+    AS $$
+DECLARE 
+	mensaje VARCHAR(20) := 'HOLA MUNDO';
+BEGIN
+	RETURN mensaje;
+END;
+$$;
+
+
+ALTER FUNCTION clinica.holamundo() OWNER TO postgres;
+
+--
+-- Name: insertarcitaagendarcita(clinica.id_paciente, clinica.id_meespecialista, character varying, date, time without time zone, character varying); Type: PROCEDURE; Schema: clinica; Owner: postgres
+--
+
+CREATE PROCEDURE clinica.insertarcitaagendarcita(IN idpaciente clinica.id_paciente, IN idespecialista clinica.id_meespecialista, IN consultorio character varying, IN fechacita date, IN horacita time without time zone, IN observaciones character varying)
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+	idCita CHAR(7);
+	idCitaAux CHAR(4);
+	fechaActual DATE := (SELECT CURRENT_DATE);
+	horaActual TIME := (SELECT CURRENT_TIME);
+	turno VARCHAR(10);
+BEGIN
+
+	IF NOT EXISTS (SELECT pk_idCita FROM CLINICA.CITA WHERE pk_idCita = 'CM-0001') THEN
+		idCita = 'CM-0001';
+	ELSE
+		idCita := (SELECT pk_idCita FROM CLINICA.CITA ORDER BY pk_idCita DESC LIMIT 1);
+		idCitaAux := (SELECT SUBSTRING(idCita, 4, 7));
+		idCitaAux := CAST(idCitaAux AS INT)+1;
+		
+		IF idCitaAux < '9' THEN
+			idCita = 'CM-00' || idCitaAux;
+		ELSEIF idCitaAux BETWEEN '10' AND '99' THEN
+			idCita = 'CM-0' || idCitaAux;
+		ELSEIF idCitaAux BETWEEN '100' AND '999' THEN
+			idCita = 'CM-' || idCitaAux;
+		END IF;
+	END IF;
+	
+	IF horaCita >= '12:00' THEN
+		turno = 'VESPERTINO';
+	ELSE
+		turno = 'MATUTINO';
+	END IF;
+	
+	IF fechaCita < fechaActual THEN
+		RAISE NOTICE 'NO SE PUEDE HACER CITAS EN FECHAS ANTERIORES - CITA NO INGRESADA';
+	ELSE
+		INSERT INTO CLINICA.CITA VALUES (idCita, idPaciente, fechaActual, horaActual);
+		
+		INSERT INTO CLINICA.AGENDAR_CITA VALUES 
+		(idCita, idEspecialista, consultorio, fechaCita, horaCita, turno, 'ESPERA', observaciones);
+		
+		RAISE NOTICE 'CITA INGRESADA CORRECTAMENTE';
+	END IF;
+
+END; $$;
+
+
+ALTER PROCEDURE clinica.insertarcitaagendarcita(IN idpaciente clinica.id_paciente, IN idespecialista clinica.id_meespecialista, IN consultorio character varying, IN fechacita date, IN horacita time without time zone, IN observaciones character varying) OWNER TO postgres;
+
+--
+-- Name: insertardiagnostico(clinica.id_meespecialista, clinica.id_paciente, character, character, character, character, character varying, character varying); Type: PROCEDURE; Schema: clinica; Owner: postgres
+--
+
+CREATE PROCEDURE clinica.insertardiagnostico(IN idespecialista clinica.id_meespecialista, IN idpaciente clinica.id_paciente, IN edad character, IN peso character, IN altura character, IN presionarterial character, IN diagnostico character varying, IN recetario character varying)
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+	imc REAL;
+	pesoNum INT;
+	alturaNum REAL;
+	nivelPeso CHAR(10);
+	fechaCreacion TIMESTAMP := (SELECT LEFT(CAST (CURRENT_TIMESTAMP AS CHAR(30)),19));
+BEGIN
+
+	pesoNum := peso;
+	alturaNum := altura;
+	imc := pesoNum / (alturaNum*alturaNum);
+	imc := CAST(imc AS CHAR(5));
+	
+	IF imc < '18.5' THEN
+		nivelPeso = 'BAJO';
+	ELSEIF imc BETWEEN '18.5' AND '24.9' THEN
+		nivelPeso = 'NORMAL';
+	ELSEIF imc BETWEEN '25.0' AND '29.9' THEN
+		nivelPeso = 'SOBREPESO';
+	ELSE
+		nivelPeso = 'OBESIDAD';
+	END IF;
+	
+	INSERT INTO CLINICA.EXPEDIENTE_DIAGNOSTICO 
+	(fk_idEspecialista, fk_idPaciente, edad, peso, altura, imc, nivelPeso, presionArterial,
+	diagnostico, recetario, fechaCreacion)
+	VALUES (idEspecialista, idPaciente, edad, peso, altura, imc, nivelPeso, presionArterial,
+		   diagnostico, recetario, fechaCreacion);
+		   
+	RAISE NOTICE 'EXPEDIENTE DIAGNOSTICO INGRESADO CORRECTAMENTE';
+
+END; $$;
+
+
+ALTER PROCEDURE clinica.insertardiagnostico(IN idespecialista clinica.id_meespecialista, IN idpaciente clinica.id_paciente, IN edad character, IN peso character, IN altura character, IN presionarterial character, IN diagnostico character varying, IN recetario character varying) OWNER TO postgres;
+
+--
+-- Name: insertarespecialista(character varying, character varying, character, date, character varying); Type: PROCEDURE; Schema: clinica; Owner: postgres
+--
+
+CREATE PROCEDURE clinica.insertarespecialista(IN nombre character varying, IN apellido character varying, IN sexo character, IN fechanacimiento date, IN especialidad character varying)
+    LANGUAGE plpgsql
+    AS $$
+DECLARE 
+	idEspecialista CHAR(7);
+	idEspecialistaAux CHAR(4);
+BEGIN 
+
+	IF NOT EXISTS (SELECT pk_idEspecialista FROM CLINICA.ESPECIALISTA WHERE pk_idEspecialista = 'ME-0001') THEN
+		idEspecialista = 'ME-0001';
+	ELSE
+		idEspecialista := (SELECT pk_idEspecialista FROM CLINICA.ESPECIALISTA ORDER BY pk_idEspecialista DESC LIMIT 1);
+		idEspecialistaAux := (SELECT SUBSTRING(idEspecialista, 4, 7));
+		idEspecialistaAux := CAST(idEspecialistaAux AS INT)+1;
+		
+		IF idEspecialistaAux < '9' THEN
+				idEspecialista = 'ME-000' || idEspecialistaAux;
+			ELSEIF idEspecialistaAux BETWEEN '10' AND '99' THEN
+				idEspecialista = 'ME-00' || idEspecialistaAux;
+			ELSEIF idEspecialistaAux BETWEEN '100' AND '999' THEN
+				idEspecialista = 'ME-0' || idEspecialistaAux;
+			END IF;
+	END IF;
+	
+	INSERT INTO CLINICA.ESPECIALISTA VALUES (idEspecialista, nombre, apellido, sexo, fechaNacimiento, especialidad);
+	
+	RAISE NOTICE 'ESPECIALISTA INGRESADO CORRECTAMENTE';
+
+END; $$;
+
+
+ALTER PROCEDURE clinica.insertarespecialista(IN nombre character varying, IN apellido character varying, IN sexo character, IN fechanacimiento date, IN especialidad character varying) OWNER TO postgres;
+
+--
+-- Name: insertarpacienteexpediente(character varying, character varying, character, date, character varying, character varying, character, character varying, character varying, character varying); Type: PROCEDURE; Schema: clinica; Owner: postgres
+--
+
+CREATE PROCEDURE clinica.insertarpacienteexpediente(IN nombre character varying, IN apellido character varying, IN sexo character, IN fechanacimiento date, IN ciudad character varying, IN estado character varying, IN telefono character, IN tiposangre character varying, IN tipoalergia character varying, IN padecimientocro character varying)
+    LANGUAGE plpgsql
+    AS $$
+DECLARE 
+	idPaciente CHAR(6);
+	idPacienteAux CHAR(4);
+	fechaCreacion TIMESTAMP := (SELECT LEFT (CAST(CURRENT_TIMESTAMP AS CHAR(30)), 19));
+BEGIN
+
+	IF NOT EXISTS (SELECT pk_idPaciente FROM CLINICA.PACIENTE WHERE pk_idPaciente = 'P-0001') THEN
+		idPaciente = 'P-0001';
+	ELSE
+		idPaciente := (SELECT pk_idPaciente FROM CLINICA.PACIENTE ORDER BY pk_idPaciente DESC LIMIT 1);
+		idPacienteAux := (SELECT SUBSTRING(idPaciente, 3, 6));
+		idPAcienteAux := CAST(idPacienteAux AS INT)+1;
+		
+		IF idPacienteAux < '9' THEN
+			idPaciente = 'P-00' || idPacienteAux;
+		ELSEIF idPacienteAux BETWEEN '10' AND '99' THEN
+			idPaciente = 'P-0' || idPacienteAux;
+		ELSEIF idPacienteAux BETWEEN '100' AND '999' THEN
+			idPaciente = 'P-' || idPacienteAux;
+		END IF;
+	END IF;
+	
+	INSERT INTO CLINICA.PACIENTE VALUES (idPaciente, nombre, apellido, sexo, fechaNacimiento, ciudad, estado, telefono);
+	
+	INSERT INTO CLINICA.EXPEDIENTE VALUES (idPaciente, tipoSangre, tipoalergia, padecimientoCro, fechaCreacion);
+	
+	RAISE NOTICE 'PACIENTE Y EXPEDIENTE INGRESADO CORRECTAMENTE';
+	
+END; $$;
+
+
+ALTER PROCEDURE clinica.insertarpacienteexpediente(IN nombre character varying, IN apellido character varying, IN sexo character, IN fechanacimiento date, IN ciudad character varying, IN estado character varying, IN telefono character, IN tiposangre character varying, IN tipoalergia character varying, IN padecimientocro character varying) OWNER TO postgres;
+
+--
+-- Name: loop(integer); Type: FUNCTION; Schema: clinica; Owner: postgres
+--
+
+CREATE FUNCTION clinica.loop(n integer) RETURNS integer
+    LANGUAGE plpgsql
+    AS $$
+DECLARE 
+	i INT := 0;
+BEGIN
+
+	FOR i IN 1..n LOOP
+		RAISE NOTICE 'CONTADOR %', i;
+	END LOOP;
+	
+END;
+$$;
+
+
+ALTER FUNCTION clinica.loop(n integer) OWNER TO postgres;
+
+--
+-- Name: loopcadados(integer); Type: FUNCTION; Schema: clinica; Owner: postgres
+--
+
+CREATE FUNCTION clinica.loopcadados(n integer) RETURNS integer
+    LANGUAGE plpgsql
+    AS $$
+DECLARE 
+	i INT = 0;
+BEGIN
+
+	FOR i IN 0..n BY 2 LOOP
+		RAISE NOTICE 'CONTADOR %', i;
+	END LOOP;
+	
+END;
+$$;
+
+
+ALTER FUNCTION clinica.loopcadados(n integer) OWNER TO postgres;
+
+--
+-- Name: loopinverso(integer); Type: FUNCTION; Schema: clinica; Owner: postgres
+--
+
+CREATE FUNCTION clinica.loopinverso(n integer) RETURNS integer
+    LANGUAGE plpgsql
+    AS $$
+DECLARE 
+	i INT = 0;
+BEGIN
+
+	FOR i IN REVERSE n..1 LOOP
+		RAISE NOTICE 'CONTADOR %', i;
+	END LOOP;
+	
+END;
+$$;
+
+
+ALTER FUNCTION clinica.loopinverso(n integer) OWNER TO postgres;
+
+--
+-- Name: mesesano(integer); Type: FUNCTION; Schema: clinica; Owner: postgres
+--
+
+CREATE FUNCTION clinica.mesesano(nmes integer) RETURNS character varying
+    LANGUAGE plpgsql
+    AS $$
+DECLARE 
+	mensaje VARCHAR(30) := 'El número del mes es: ';
+BEGIN
+	
+	CASE
+		WHEN nMes = 1 THEN
+			RETURN mensaje || 'Enero';
+		WHEN nMes = 2 THEN
+			RETURN mensaje || 'Febrero';
+		WHEN nMes = 3 THEN
+			RETURN mensaje || 'Marzo';
+		WHEN nMes = 4 THEN
+			RETURN mensaje || 'Abril';
+		WHEN nMes = 5 THEN
+			RETURN mensaje || 'Mayo';
+		WHEN nMes = 6 THEN
+			RETURN mensaje || 'Junio';
+		WHEN nMes = 7 THEN
+			RETURN mensaje || 'Julio';
+		WHEN nMes = 8 THEN
+			RETURN mensaje || 'Agosto';
+		WHEN nMes = 9 THEN
+			RETURN mensaje || 'Septiembre';
+		WHEN nMes = 10 THEN
+			RETURN mensaje || 'Octubre';
+		WHEN nMes = 11 THEN
+			RETURN mensaje || 'Noviembre';
+		WHEN nMes = 12 THEN
+			RETURN mensaje || 'Diciembre';
+		ELSE
+			RETURN 'El número no corresponde a un mes del año';
+	END CASE;
+			
+END;
+$$;
+
+
+ALTER FUNCTION clinica.mesesano(nmes integer) OWNER TO postgres;
+
+--
+-- Name: multiplicarnumeros(integer, integer); Type: FUNCTION; Schema: clinica; Owner: postgres
+--
+
+CREATE FUNCTION clinica.multiplicarnumeros(num1 integer, num2 integer) RETURNS integer
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+	RETURN num1 * num2;
+END;
+$$;
+
+
+ALTER FUNCTION clinica.multiplicarnumeros(num1 integer, num2 integer) OWNER TO postgres;
+
+--
+-- Name: numerosimpares(integer); Type: FUNCTION; Schema: clinica; Owner: postgres
+--
+
+CREATE FUNCTION clinica.numerosimpares(n integer) RETURNS integer
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+	i INT := 0;
+BEGIN
+
+	WHILE i < n LOOP
+		IF (i%2)<>0 THEN
+			RAISE NOTICE 'CONTADOR %', i;
+		END IF;
+		i = i + 1;
+	END LOOP;
+
+END;
+$$;
+
+
+ALTER FUNCTION clinica.numerosimpares(n integer) OWNER TO postgres;
+
+--
+-- Name: numerospares(integer); Type: FUNCTION; Schema: clinica; Owner: postgres
+--
+
+CREATE FUNCTION clinica.numerospares(n integer) RETURNS integer
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+	i INT := 0;
+BEGIN
+
+	WHILE i < n LOOP
+		IF (i%2)=0 THEN
+			RAISE NOTICE 'CONTADOR %', i;
+		END IF;
+		i = i + 1;
+	END LOOP;
+
+END;
+$$;
+
+
+ALTER FUNCTION clinica.numerospares(n integer) OWNER TO postgres;
+
+--
+-- Name: nummayormenor(integer, integer); Type: FUNCTION; Schema: clinica; Owner: postgres
+--
+
+CREATE FUNCTION clinica.nummayormenor(n1 integer, n2 integer) RETURNS character varying
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+	IF n1 > n2 THEN
+		RETURN 'EL NÚMERO MAYOR ES: '||n1;
+	ELSEIF n1<n2 THEN
+		RETURN 'EL NÚMERO MAYOR ES: '||n2;
+	ELSE
+		RETURN 'LOS NÚMEROS SON INGUALES';
+	END IF;
+END;
+$$;
+
+
+ALTER FUNCTION clinica.nummayormenor(n1 integer, n2 integer) OWNER TO postgres;
+
+--
+-- Name: realizarcita(clinica.id_cita); Type: PROCEDURE; Schema: clinica; Owner: postgres
+--
+
+CREATE PROCEDURE clinica.realizarcita(IN idcita clinica.id_cita)
+    LANGUAGE plpgsql
+    AS $$
+DECLARE 
+	status CHAR(10) := (SELECT status FROM CLINICA.AGENDAR_CITA WHERE fk_idCita = idCita);
+BEGIN
+
+	IF NOT EXISTS (SELECT pk_idCita FROM CLINICA.CITA WHERE pk_idCita = idCita) THEN
+		RAISE NOTICE 'EL ID DE LA CITA NO EXISTE EN LA BASE DE DATOS';
+	ELSEIF status = 'CANCELADA' THEN
+		RAISE NOTICE 'LA CITA YA HA SIDO CANCELADA';
+	ELSE
+		UPDATE CLINICA.AGENDAR_CITA SET status = 'REALIZADA' WHERE fk_idCita = idCita;
+		
+		RAISE NOTICE 'CITA REALIZADA CORRECTAMENTE';
+	END IF;
+
+END; $$;
+
+
+ALTER PROCEDURE clinica.realizarcita(IN idcita clinica.id_cita) OWNER TO postgres;
+
+--
+-- Name: sumanumeros(integer, integer); Type: FUNCTION; Schema: clinica; Owner: postgres
+--
+
+CREATE FUNCTION clinica.sumanumeros(num1 integer, num2 integer) RETURNS integer
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+	RETURN num1 + num2;
+END;
+$$;
+
+
+ALTER FUNCTION clinica.sumanumeros(num1 integer, num2 integer) OWNER TO postgres;
+
+--
+-- Name: while(integer); Type: FUNCTION; Schema: clinica; Owner: postgres
+--
+
+CREATE FUNCTION clinica.while(n integer) RETURNS integer
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+	i INT := 0;
+BEGIN
+
+	WHILE i < n LOOP
+		RAISE NOTICE 'CONTADOR %', i;
+		i = i + 1;
+	END LOOP;
+
+END;
+$$;
+
+
+ALTER FUNCTION clinica.while(n integer) OWNER TO postgres;
+
+SET default_tablespace = '';
+
+SET default_table_access_method = heap;
+
+--
+-- Name: agendar_cita; Type: TABLE; Schema: clinica; Owner: postgres
+--
+
+CREATE TABLE clinica.agendar_cita (
+    fk_idcita clinica.id_cita NOT NULL,
+    fk_idespecialista clinica.id_meespecialista NOT NULL,
+    consultorio character varying(20) NOT NULL,
+    fechacita date NOT NULL,
+    horacita time without time zone NOT NULL,
+    turno character varying(10) NOT NULL,
+    status character varying(10) NOT NULL,
+    observacionesconsulta character varying(100) NOT NULL
+);
+
+
+ALTER TABLE clinica.agendar_cita OWNER TO postgres;
+
+--
+-- Name: cita; Type: TABLE; Schema: clinica; Owner: postgres
+--
+
+CREATE TABLE clinica.cita (
+    pk_idcita clinica.id_cita NOT NULL,
+    fk_idpaciente clinica.id_paciente,
+    fecha date NOT NULL,
+    hora time without time zone NOT NULL
+);
+
+
+ALTER TABLE clinica.cita OWNER TO postgres;
+
+--
+-- Name: datos_pacientes_personal; Type: TABLE; Schema: clinica; Owner: postgres
+--
+
+CREATE TABLE clinica.datos_pacientes_personal (
+    folio integer NOT NULL,
+    tipomovimiento character varying(20),
+    idpaciente clinica.id_paciente,
+    nombrepaciente character varying(20),
+    apellidopaciente character varying(20),
+    usuario character varying(20),
+    fecha timestamp without time zone
+);
+
+
+ALTER TABLE clinica.datos_pacientes_personal OWNER TO postgres;
+
+--
+-- Name: datos_pacientes_personal_folio_seq; Type: SEQUENCE; Schema: clinica; Owner: postgres
+--
+
+CREATE SEQUENCE clinica.datos_pacientes_personal_folio_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE clinica.datos_pacientes_personal_folio_seq OWNER TO postgres;
+
+--
+-- Name: datos_pacientes_personal_folio_seq; Type: SEQUENCE OWNED BY; Schema: clinica; Owner: postgres
+--
+
+ALTER SEQUENCE clinica.datos_pacientes_personal_folio_seq OWNED BY clinica.datos_pacientes_personal.folio;
+
+
+--
+-- Name: especialista; Type: TABLE; Schema: clinica; Owner: postgres
+--
+
+CREATE TABLE clinica.especialista (
+    pk_idespecialista clinica.id_meespecialista NOT NULL,
+    nombre character varying(20) NOT NULL,
+    apellido character varying(20) NOT NULL,
+    sexo character(1) NOT NULL,
+    fechanacimiento date NOT NULL,
+    especialidad character varying(30) NOT NULL
+);
+
+
+ALTER TABLE clinica.especialista OWNER TO postgres;
+
+--
+-- Name: expediente; Type: TABLE; Schema: clinica; Owner: postgres
+--
+
+CREATE TABLE clinica.expediente (
+    pk_idpaciente clinica.id_paciente NOT NULL,
+    tiposangre character varying(20) NOT NULL,
+    tipoalergia character varying(30) NOT NULL,
+    padecimientocro character varying(50) NOT NULL,
+    fechacreacion timestamp without time zone NOT NULL
+);
+
+
+ALTER TABLE clinica.expediente OWNER TO postgres;
+
+--
+-- Name: expediente_diagnostico; Type: TABLE; Schema: clinica; Owner: postgres
+--
+
+CREATE TABLE clinica.expediente_diagnostico (
+    folio integer NOT NULL,
+    fk_idespecialista clinica.id_meespecialista,
+    fk_idpaciente clinica.id_paciente,
+    edad character(3) NOT NULL,
+    peso character(3) NOT NULL,
+    altura character(4) NOT NULL,
+    imc character(5) NOT NULL,
+    nivelpeso character(10) NOT NULL,
+    presionarterial character(8) NOT NULL,
+    diagnostico character varying(150) NOT NULL,
+    recetario character varying(150) NOT NULL,
+    fechacreacion timestamp without time zone NOT NULL
+);
+
+
+ALTER TABLE clinica.expediente_diagnostico OWNER TO postgres;
+
+--
+-- Name: expediente_diagnostico_folio_seq; Type: SEQUENCE; Schema: clinica; Owner: postgres
+--
+
+CREATE SEQUENCE clinica.expediente_diagnostico_folio_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE clinica.expediente_diagnostico_folio_seq OWNER TO postgres;
+
+--
+-- Name: expediente_diagnostico_folio_seq; Type: SEQUENCE OWNED BY; Schema: clinica; Owner: postgres
+--
+
+ALTER SEQUENCE clinica.expediente_diagnostico_folio_seq OWNED BY clinica.expediente_diagnostico.folio;
+
+
+--
+-- Name: paciente; Type: TABLE; Schema: clinica; Owner: postgres
+--
+
+CREATE TABLE clinica.paciente (
+    pk_idpaciente clinica.id_paciente NOT NULL,
+    nombre character varying(20) NOT NULL,
+    apellido character varying(20) NOT NULL,
+    sexo character(1) NOT NULL,
+    fechanacimiento date NOT NULL,
+    ciudad character varying(20) NOT NULL,
+    estado character varying(20) NOT NULL,
+    telefono character(10)
+);
+
+
+ALTER TABLE clinica.paciente OWNER TO postgres;
+
+--
+-- Name: pacientes_masculinos; Type: VIEW; Schema: clinica; Owner: postgres
+--
+
+CREATE VIEW clinica.pacientes_masculinos AS
+ SELECT pk_idpaciente,
+    nombre,
+    apellido,
+    sexo,
+    fechanacimiento,
+    ciudad,
+    estado,
+    telefono
+   FROM clinica.paciente
+  WHERE (sexo = 'M'::bpchar);
+
+
+ALTER VIEW clinica.pacientes_masculinos OWNER TO postgres;
+
+--
+-- Name: datos_pacientes_personal folio; Type: DEFAULT; Schema: clinica; Owner: postgres
+--
+
+ALTER TABLE ONLY clinica.datos_pacientes_personal ALTER COLUMN folio SET DEFAULT nextval('clinica.datos_pacientes_personal_folio_seq'::regclass);
+
+
+--
+-- Name: expediente_diagnostico folio; Type: DEFAULT; Schema: clinica; Owner: postgres
+--
+
+ALTER TABLE ONLY clinica.expediente_diagnostico ALTER COLUMN folio SET DEFAULT nextval('clinica.expediente_diagnostico_folio_seq'::regclass);
+
+
+--
+-- Data for Name: agendar_cita; Type: TABLE DATA; Schema: clinica; Owner: postgres
+--
+
+COPY clinica.agendar_cita (fk_idcita, fk_idespecialista, consultorio, fechacita, horacita, turno, status, observacionesconsulta) FROM stdin;
+CM-0001	ME-0001	CONSULTORIO 1	2022-10-04	12:00:00	MATUTINO	ESPERA	NA
+CM-0002	ME-0001	CONSULTORIO 1	2022-10-04	12:20:00	MATUTINO	ESPERA	NA
+CM-0003	ME-0002	CONSULTORIO 2	2022-10-05	12:00:00	MATUTINO	ESPERA	NA
+CM-0004	ME-0002	CONSULTORIO 2	2022-10-05	12:00:00	MATUTINO	ESPERA	NA
+CM-0005	ME-0003	CONSULTORIO 3	2022-10-06	12:00:00	MATUTINO	ESPERA	NA
+CM-0006	ME-0003	CONSULTORIO 3	2022-10-07	14:00:00	VESPERTINO	ESPERA	NA
+CM-0007	ME-0004	CONSULTORIO 4	2022-10-07	14:20:00	VESPERTINO	ESPERA	NA
+CM-0008	ME-0004	CONSULTORIO 4	2022-10-08	13:00:00	VESPERTINO	ESPERA	NA
+CM-0009	ME-0005	CONSULTORIO 5	2022-10-08	13:20:00	VESPERTINO	ESPERA	NA
+CM-0012	ME-0006	CONSULTORIO 6	2022-10-08	15:00:00	MATUTINO	ESPERA	NA
+CM-0014	ME-0001	CONSULTORIO 1	2023-11-02	12:00:00	MATUTINO	ESPERA	NA
+CM-0010	ME-0005	CONSULTORIO 5	2022-10-08	15:00:00	VESPERTINO	CANCELADA	NA
+CM-0011	ME-0006	CONSULTORIO 6	2022-10-08	15:00:00	VESPERTINO	REALIZADA	NA
+\.
+
+
+--
+-- Data for Name: cita; Type: TABLE DATA; Schema: clinica; Owner: postgres
+--
+
+COPY clinica.cita (pk_idcita, fk_idpaciente, fecha, hora) FROM stdin;
+CM-0001	P-0001	2022-10-01	12:00:00
+CM-0002	P-0002	2022-10-01	12:20:00
+CM-0003	P-0003	2022-10-02	12:20:00
+CM-0004	P-0004	2022-10-02	10:00:00
+CM-0005	P-0005	2022-10-03	08:20:00
+CM-0006	P-0006	2022-10-03	12:20:00
+CM-0007	P-0007	2022-10-04	12:20:00
+CM-0008	P-0008	2022-10-04	10:00:00
+CM-0009	P-0009	2022-10-04	08:20:00
+CM-0010	P-0010	2022-10-05	08:20:00
+CM-0011	P-0011	2022-10-05	12:30:00
+CM-0012	P-0012	2022-10-05	05:20:00
+CM-0014	P-0001	2023-11-01	10:32:29.279047
+\.
+
+
+--
+-- Data for Name: datos_pacientes_personal; Type: TABLE DATA; Schema: clinica; Owner: postgres
+--
+
+COPY clinica.datos_pacientes_personal (folio, tipomovimiento, idpaciente, nombrepaciente, apellidopaciente, usuario, fecha) FROM stdin;
+1	BORRADO	P-0014	SAMANTA	RIVERA	postgres	2023-11-01 11:31:35
+2	ACTUALIZACIÓN	P-0012	VICTORIA	SOLIS	postgres	2023-11-01 11:34:50
+3	ACTUALIZACIÓN	P-0011	ENRIQUE	VERA	administrador	2023-11-01 11:44:51
+4	ACTUALIZACIÓN	P-0012	VICTORIA	SOLIS	recepcionista_1	2023-11-01 11:46:38
+5	BORRADO	P-0013	ESTEBAN	DIAZ	recepcionista_1	2023-11-01 11:47:20
+\.
+
+
+--
+-- Data for Name: especialista; Type: TABLE DATA; Schema: clinica; Owner: postgres
+--
+
+COPY clinica.especialista (pk_idespecialista, nombre, apellido, sexo, fechanacimiento, especialidad) FROM stdin;
+ME-0001	REYNA	GUADALUPE	F	1986-01-01	MEDICO GENERAL
+ME-0002	ENRIQUE	ORTIZ	M	1968-10-01	NEFROLOGIA
+ME-0003	FELIPE	HERNANDEZ	M	1980-10-02	MEDICO GENERAL
+ME-0004	KENIA	LOPEZ	F	1973-01-01	PEDIATRA
+ME-0005	GEORGE	VELASCO	M	2000-01-20	CARDIÓLOGO
+ME-0006	JUAN	MARTINEZ	M	1980-02-23	MEDICO GENERAL
+ME-0007	JORGE	VELASCO	M	1990-01-01	PEDIATRIA
+\.
+
+
+--
+-- Data for Name: expediente; Type: TABLE DATA; Schema: clinica; Owner: postgres
+--
+
+COPY clinica.expediente (pk_idpaciente, tiposangre, tipoalergia, padecimientocro, fechacreacion) FROM stdin;
+P-0002	B NEGATIVO	ALERGIA AL POLVO	NA	2022-06-10 00:00:00
+P-0003	O NEGATIVO	NA	DIABETES	2022-06-14 00:00:00
+P-0004	B POSITIVO	ALERGIA A LOS MARISCOS	ASMA	2022-06-15 00:00:00
+P-0005	B POSITIVO	NA	DIABETES	2022-06-16 00:00:00
+P-0006	B POSITIVO	ALERGIA AL POLVO	NA	2022-06-17 00:00:00
+P-0007	B POSITIVO	NA	CANCER	2022-06-20 00:00:00
+P-0001	O POSITIVO	NA	NA	2022-06-10 00:00:00
+P-0008	O POSITIVO	NA	NA	2022-06-24 00:00:00
+P-0009	O POSITIVO	NA	NA	2022-07-02 00:00:00
+P-0010	O POSITIVO	NA	NA	2022-07-06 00:00:00
+P-0011	O POSITIVO	NA	NA	2022-08-06 00:00:00
+P-0012	A NEGATIVO	NA	NA	2022-09-06 00:00:00
+P-0015	O POSITIVO	NA	NA	2023-11-01 09:51:07
+\.
+
+
+--
+-- Data for Name: expediente_diagnostico; Type: TABLE DATA; Schema: clinica; Owner: postgres
+--
+
+COPY clinica.expediente_diagnostico (folio, fk_idespecialista, fk_idpaciente, edad, peso, altura, imc, nivelpeso, presionarterial, diagnostico, recetario, fechacreacion) FROM stdin;
+1	ME-0001	P-0001	24 	70 	1.70	24.0 	NORMAL    	120/70  	NA	NA	2022-11-22 00:00:00
+2	ME-0001	P-0002	33 	80 	1.77	27.0 	SOBREPESO 	125/73  	NA	NA	2022-11-23 00:00:00
+3	ME-0001	P-0003	45 	62 	1.64	26.6 	NORMAL    	130/70  	NA	NA	2022-11-24 00:00:00
+4	ME-0002	P-0003	45 	62 	1.64	26.6 	NORMAL    	129/70  	NA	NA	2022-11-24 00:00:00
+5	ME-0002	P-0004	23 	65 	1.60	23.0 	NORMAL    	125/70  	NA	NA	2022-11-25 00:00:00
+6	ME-0003	P-0005	37 	90 	1.77	29.0 	OBESIDAD  	129/80  	NA	NA	2022-11-25 00:00:00
+7	ME-0003	P-0005	37 	90 	1.77	29.0 	OBESIDAD  	128/78  	NA	NA	2022-11-25 00:00:00
+8	ME-0003	P-0006	46 	72 	1.68	24.0 	NORMAL    	120/69  	NA	NA	2022-11-26 00:00:00
+9	ME-0003	P-0007	31 	76 	1.77	24.0 	NORMAL    	125/73  	NA	NA	2022-11-27 00:00:00
+10	ME-0004	P-0007	31 	76 	1.77	24.0 	NORMAL    	125/67  	NA	NA	2022-11-27 00:00:00
+11	ME-0004	P-0008	21 	68 	1.63	24.0 	NORMAL    	119/69  	NA	NA	2022-11-29 00:00:00
+12	ME-0005	P-0009	26 	90 	1.75	29.0 	SOBREPESO 	132/76  	NA	NA	2022-12-01 00:00:00
+13	ME-0005	P-0009	26 	90 	1.75	29.0 	SOBREPESO 	130/74  	NA	NA	2022-12-01 00:00:00
+14	ME-0005	P-0010	18 	60 	1.59	23.0 	NORMAL    	120/68  	NA	NA	2022-12-02 00:00:00
+15	ME-0006	P-0011	18 	60 	1.59	23.0 	NORMAL    	119/65  	NA	NA	2022-04-02 00:00:00
+16	ME-0006	P-0012	18 	64 	1.75	23.0 	NORMAL    	119/80  	NA	NA	2022-11-02 00:00:00
+17	ME-0001	P-0001	20 	80 	1.75	26.12	SOBREPESO 	120/70  	NA	NA	2023-11-01 10:52:26
+\.
+
+
+--
+-- Data for Name: paciente; Type: TABLE DATA; Schema: clinica; Owner: postgres
+--
+
+COPY clinica.paciente (pk_idpaciente, nombre, apellido, sexo, fechanacimiento, ciudad, estado, telefono) FROM stdin;
+P-0003	DANIEL	CARMONA	M	1998-12-07	MEXICO	MEXICO	551234567 
+P-0004	JUAN	HERNANDEZ	M	1990-07-21	MONTERREY	NUEVO LEON	551234321 
+P-0005	FERNANDA	MORALES	F	1973-07-01	MEXICO	MEXICO	5412309872
+P-0006	ANDREA	ZUÑIGA	F	2000-12-02	GUADALAJARA	JALISCO	3309876522
+P-0007	ALBERTO	PEREYRA	M	1986-10-23	MEXICO	MEXICO	5565423983
+P-0008	KAREN	SOTO	F	1978-07-07	MEXICO	MEXICO	5565423097
+P-0009	ANDRES	ORTIZ	M	1990-10-09	MONTERREY	MEXICO	5698782347
+P-0010	LESLY	RODRIGUEZ	F	2001-02-11	MEXICO	MEXICO	5543454352
+P-0001	JUAN	LAGUNA	M	2004-10-06	MEXICO	MEXICO	3122031388
+P-0002	ANDRÉS	QUINTERO	M	2004-09-09	MONTERREY	NUEVO LEON	3227091029
+P-0015	DANIEL	CARDONA	M	1999-01-01	MONTERREY	NUEVO LEON	3144844664
+P-0011	ENRIQUE	VERA	M	1996-11-12	MONTERREY	JALISCO	3309815273
+P-0012	VICTORIA	SOLIS	F	2002-03-10	MONTERREY	MEXICO	5565278126
+\.
+
+
+--
+-- Name: datos_pacientes_personal_folio_seq; Type: SEQUENCE SET; Schema: clinica; Owner: postgres
+--
+
+SELECT pg_catalog.setval('clinica.datos_pacientes_personal_folio_seq', 5, true);
+
+
+--
+-- Name: expediente_diagnostico_folio_seq; Type: SEQUENCE SET; Schema: clinica; Owner: postgres
+--
+
+SELECT pg_catalog.setval('clinica.expediente_diagnostico_folio_seq', 17, true);
+
+
+--
+-- Name: agendar_cita agendar_cita_pkey; Type: CONSTRAINT; Schema: clinica; Owner: postgres
+--
+
+ALTER TABLE ONLY clinica.agendar_cita
+    ADD CONSTRAINT agendar_cita_pkey PRIMARY KEY (fk_idcita, fk_idespecialista);
+
+
+--
+-- Name: cita cita_pkey; Type: CONSTRAINT; Schema: clinica; Owner: postgres
+--
+
+ALTER TABLE ONLY clinica.cita
+    ADD CONSTRAINT cita_pkey PRIMARY KEY (pk_idcita);
+
+
+--
+-- Name: datos_pacientes_personal datos_pacientes_personal_pkey; Type: CONSTRAINT; Schema: clinica; Owner: postgres
+--
+
+ALTER TABLE ONLY clinica.datos_pacientes_personal
+    ADD CONSTRAINT datos_pacientes_personal_pkey PRIMARY KEY (folio);
+
+
+--
+-- Name: especialista especialista_pkey; Type: CONSTRAINT; Schema: clinica; Owner: postgres
+--
+
+ALTER TABLE ONLY clinica.especialista
+    ADD CONSTRAINT especialista_pkey PRIMARY KEY (pk_idespecialista);
+
+
+--
+-- Name: expediente_diagnostico expediente_diagnostico_pkey; Type: CONSTRAINT; Schema: clinica; Owner: postgres
+--
+
+ALTER TABLE ONLY clinica.expediente_diagnostico
+    ADD CONSTRAINT expediente_diagnostico_pkey PRIMARY KEY (folio);
+
+
+--
+-- Name: expediente expediente_pkey; Type: CONSTRAINT; Schema: clinica; Owner: postgres
+--
+
+ALTER TABLE ONLY clinica.expediente
+    ADD CONSTRAINT expediente_pkey PRIMARY KEY (pk_idpaciente);
+
+
+--
+-- Name: paciente paciente_pkey; Type: CONSTRAINT; Schema: clinica; Owner: postgres
+--
+
+ALTER TABLE ONLY clinica.paciente
+    ADD CONSTRAINT paciente_pkey PRIMARY KEY (pk_idpaciente);
+
+
+--
+-- Name: paciente paciente_telefono_key; Type: CONSTRAINT; Schema: clinica; Owner: postgres
+--
+
+ALTER TABLE ONLY clinica.paciente
+    ADD CONSTRAINT paciente_telefono_key UNIQUE (telefono);
+
+
+--
+-- Name: paciente actualizado_paciente; Type: TRIGGER; Schema: clinica; Owner: postgres
+--
+
+CREATE TRIGGER actualizado_paciente AFTER UPDATE ON clinica.paciente FOR EACH ROW EXECUTE FUNCTION clinica.actualizadopaciente();
+
+
+--
+-- Name: paciente borrado_paciente; Type: TRIGGER; Schema: clinica; Owner: postgres
+--
+
+CREATE TRIGGER borrado_paciente AFTER DELETE ON clinica.paciente FOR EACH ROW EXECUTE FUNCTION clinica.borradopaciente();
+
+
+--
+-- Name: agendar_cita agendar_cita_fk_idcita_fkey; Type: FK CONSTRAINT; Schema: clinica; Owner: postgres
+--
+
+ALTER TABLE ONLY clinica.agendar_cita
+    ADD CONSTRAINT agendar_cita_fk_idcita_fkey FOREIGN KEY (fk_idcita) REFERENCES clinica.cita(pk_idcita) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: agendar_cita agendar_cita_fk_idespecialista_fkey; Type: FK CONSTRAINT; Schema: clinica; Owner: postgres
+--
+
+ALTER TABLE ONLY clinica.agendar_cita
+    ADD CONSTRAINT agendar_cita_fk_idespecialista_fkey FOREIGN KEY (fk_idespecialista) REFERENCES clinica.especialista(pk_idespecialista) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: cita cita_fk_idpaciente_fkey; Type: FK CONSTRAINT; Schema: clinica; Owner: postgres
+--
+
+ALTER TABLE ONLY clinica.cita
+    ADD CONSTRAINT cita_fk_idpaciente_fkey FOREIGN KEY (fk_idpaciente) REFERENCES clinica.paciente(pk_idpaciente) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: expediente_diagnostico expediente_diagnostico_fk_idespecialista_fkey; Type: FK CONSTRAINT; Schema: clinica; Owner: postgres
+--
+
+ALTER TABLE ONLY clinica.expediente_diagnostico
+    ADD CONSTRAINT expediente_diagnostico_fk_idespecialista_fkey FOREIGN KEY (fk_idespecialista) REFERENCES clinica.especialista(pk_idespecialista) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: expediente_diagnostico expediente_diagnostico_fk_idpaciente_fkey; Type: FK CONSTRAINT; Schema: clinica; Owner: postgres
+--
+
+ALTER TABLE ONLY clinica.expediente_diagnostico
+    ADD CONSTRAINT expediente_diagnostico_fk_idpaciente_fkey FOREIGN KEY (fk_idpaciente) REFERENCES clinica.paciente(pk_idpaciente) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: expediente expediente_pk_idpaciente_fkey; Type: FK CONSTRAINT; Schema: clinica; Owner: postgres
+--
+
+ALTER TABLE ONLY clinica.expediente
+    ADD CONSTRAINT expediente_pk_idpaciente_fkey FOREIGN KEY (pk_idpaciente) REFERENCES clinica.paciente(pk_idpaciente) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: SCHEMA clinica; Type: ACL; Schema: -; Owner: postgres
+--
+
+GRANT USAGE ON SCHEMA clinica TO dba;
+GRANT USAGE ON SCHEMA clinica TO jefe_especialista;
+GRANT USAGE ON SCHEMA clinica TO especialista;
+GRANT USAGE ON SCHEMA clinica TO recepcionista;
+
+
+--
+-- Name: TABLE agendar_cita; Type: ACL; Schema: clinica; Owner: postgres
+--
+
+GRANT ALL ON TABLE clinica.agendar_cita TO dba WITH GRANT OPTION;
+GRANT SELECT,INSERT,UPDATE ON TABLE clinica.agendar_cita TO recepcionista WITH GRANT OPTION;
+
+
+--
+-- Name: TABLE cita; Type: ACL; Schema: clinica; Owner: postgres
+--
+
+GRANT ALL ON TABLE clinica.cita TO dba WITH GRANT OPTION;
+GRANT SELECT,INSERT,UPDATE ON TABLE clinica.cita TO recepcionista WITH GRANT OPTION;
+
+
+--
+-- Name: TABLE datos_pacientes_personal; Type: ACL; Schema: clinica; Owner: postgres
+--
+
+GRANT ALL ON TABLE clinica.datos_pacientes_personal TO dba WITH GRANT OPTION;
+GRANT INSERT ON TABLE clinica.datos_pacientes_personal TO recepcionista WITH GRANT OPTION;
+
+
+--
+-- Name: SEQUENCE datos_pacientes_personal_folio_seq; Type: ACL; Schema: clinica; Owner: postgres
+--
+
+GRANT ALL ON SEQUENCE clinica.datos_pacientes_personal_folio_seq TO dba WITH GRANT OPTION;
+GRANT ALL ON SEQUENCE clinica.datos_pacientes_personal_folio_seq TO recepcionista WITH GRANT OPTION;
+
+
+--
+-- Name: TABLE especialista; Type: ACL; Schema: clinica; Owner: postgres
+--
+
+GRANT ALL ON TABLE clinica.especialista TO dba WITH GRANT OPTION;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE clinica.especialista TO jefe_especialista WITH GRANT OPTION;
+
+
+--
+-- Name: TABLE expediente; Type: ACL; Schema: clinica; Owner: postgres
+--
+
+GRANT ALL ON TABLE clinica.expediente TO dba WITH GRANT OPTION;
+GRANT SELECT,INSERT,UPDATE ON TABLE clinica.expediente TO jefe_especialista WITH GRANT OPTION;
+GRANT SELECT,INSERT,UPDATE ON TABLE clinica.expediente TO especialista WITH GRANT OPTION;
+
+
+--
+-- Name: TABLE expediente_diagnostico; Type: ACL; Schema: clinica; Owner: postgres
+--
+
+GRANT ALL ON TABLE clinica.expediente_diagnostico TO dba WITH GRANT OPTION;
+GRANT SELECT,INSERT,UPDATE ON TABLE clinica.expediente_diagnostico TO jefe_especialista WITH GRANT OPTION;
+GRANT SELECT,INSERT,UPDATE ON TABLE clinica.expediente_diagnostico TO especialista WITH GRANT OPTION;
+
+
+--
+-- Name: SEQUENCE expediente_diagnostico_folio_seq; Type: ACL; Schema: clinica; Owner: postgres
+--
+
+GRANT ALL ON SEQUENCE clinica.expediente_diagnostico_folio_seq TO dba WITH GRANT OPTION;
+GRANT ALL ON SEQUENCE clinica.expediente_diagnostico_folio_seq TO recepcionista WITH GRANT OPTION;
+
+
+--
+-- Name: TABLE paciente; Type: ACL; Schema: clinica; Owner: postgres
+--
+
+GRANT ALL ON TABLE clinica.paciente TO dba WITH GRANT OPTION;
+GRANT SELECT ON TABLE clinica.paciente TO especialista WITH GRANT OPTION;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE clinica.paciente TO recepcionista WITH GRANT OPTION;
+
+
+--
+-- Name: TABLE pacientes_masculinos; Type: ACL; Schema: clinica; Owner: postgres
+--
+
+GRANT ALL ON TABLE clinica.pacientes_masculinos TO dba WITH GRANT OPTION;
+
+
+--
+-- PostgreSQL database dump complete
+--
+
